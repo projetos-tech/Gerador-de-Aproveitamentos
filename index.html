@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Otimizador privado de planos de corte para chapas de polionda.">
+  <meta name="theme-color" content="#f6f7fb">
+  <title>Plano de Corte · Polionda</title>
+  <link rel="icon" type="image/svg+xml" href="mark.svg">
+  <link rel="stylesheet" href="app.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-mark" data-icon="layers"></span>
+        <span>Plano de Corte</span>
+        <span class="brand-line"></span>
+        <span class="brand-material">Polionda</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="intro" aria-labelledby="title">
+      <div>
+        <h1 id="title">Otimizador de polionda</h1>
+        <p>Cadastre as peças, compare os encaixes e exporte o plano para corte.</p>
+      </div>
+      <button class="button secondary example-button" id="example" type="button"><span data-icon="flask"></span> Carregar exemplo</button>
+    </section>
+
+    <div class="workspace">
+      <aside class="sidebar" aria-label="Lote e dimensões">
+        <section class="card material-card" aria-labelledby="material-title">
+          <div class="material-top">
+            <span class="section-icon" data-icon="sheet"></span>
+            <div>
+              <h2 id="material-title">Chapa de polionda</h2>
+              <p><strong id="material-size">1.300 × 2.000</strong> mm</p>
+            </div>
+            <button type="button" id="edit-sheet" class="icon-button edit-sheet" title="Editar parâmetros da chapa" aria-label="Editar parâmetros da chapa"><span data-icon="edit"></span></button>
+          </div>
+          <dl class="material-specs">
+            <div><dt>Borda livre</dt><dd id="material-border">50 mm</dd></div>
+            <div><dt>Entre peças</dt><dd id="material-gap">5 mm</dd></div>
+            <div><dt>Giro livre</dt><dd id="material-step">15°</dd></div>
+          </dl>
+        </section>
+
+        <section class="card lot-card" aria-labelledby="lot-title">
+          <header class="lot-header">
+            <div>
+              <h2 id="lot-title">Peças do lote</h2>
+              <p id="lot-source">Lote de exemplo</p>
+            </div>
+            <button type="button" id="clear-lot" class="icon-button clear-lot" title="Esvaziar lote" aria-label="Esvaziar lote"><span data-icon="trash"></span></button>
+          </header>
+          <ul id="pieces" class="pieces" aria-label="Peças cadastradas"></ul>
+          <div class="lot-footer">
+            <div class="lot-buttons">
+              <button class="button secondary" id="add" type="button"><span data-icon="plus"></span> Nova peça</button>
+              <button class="button secondary" id="import" type="button"><span data-icon="upload"></span> Importar</button>
+            </div>
+            <button class="button primary optimize" id="optimize" type="button"><span data-icon="nest"></span><span id="optimize-label">Otimizar encaixe</span></button>
+            <p class="lot-status" id="lot-status" aria-live="polite"></p>
+          </div>
+        </section>
+      </aside>
+
+      <div class="results">
+        <section class="metrics" aria-label="Indicadores do plano atual">
+          <div class="metric card">
+            <span class="metric-icon" data-icon="layers"></span>
+            <span class="metric-label">Chapas</span>
+            <strong id="metric-sheets">—</strong>
+          </div>
+          <div class="metric card">
+            <span class="metric-icon" data-icon="area"></span>
+            <span class="metric-label">Área utilizada</span>
+            <strong id="metric-area">—</strong>
+          </div>
+          <div class="metric card">
+            <span class="metric-icon green" data-icon="chart"></span>
+            <span class="metric-label">Aproveitamento</span>
+            <strong id="metric-yield">—</strong>
+          </div>
+          <div class="metric card">
+            <span class="metric-icon" data-icon="scrap"></span>
+            <span class="metric-label" title="Área fora das peças, incluindo as bordas e os recortes internos">Desperdício</span>
+            <strong id="metric-waste">—</strong>
+          </div>
+        </section>
+
+        <section class="card plan-card" aria-labelledby="plan-title">
+          <header class="plan-header">
+            <div>
+              <div class="plan-title-row"><h2 id="plan-title">Plano de corte</h2><span class="best-tag" id="plan-badge" hidden><span data-icon="check"></span> Melhor resultado</span></div>
+              <p id="plan-caption">Aguardando cálculo</p>
+            </div>
+            <button class="button primary export" id="export" type="button" disabled title="Exportar o melhor plano em milímetros"><span data-icon="file"></span> Exportar DXF</button>
+          </header>
+
+          <div class="plan-content">
+            <div class="canvas-frame">
+              <div class="zoom" aria-label="Zoom do desenho">
+                <button class="icon-button" type="button" id="zoom-out" title="Reduzir zoom" aria-label="Reduzir zoom"><span data-icon="minus"></span></button>
+                <button class="fit-button" type="button" id="zoom-reset" title="Ajustar à vista" aria-label="Ajustar à vista">100%</button>
+                <button class="icon-button" type="button" id="zoom-in" title="Ampliar zoom" aria-label="Ampliar zoom"><span data-icon="plus"></span></button>
+              </div>
+              <div class="canvas-scroll" id="canvas">
+                <div class="empty-canvas"><span class="section-icon" data-icon="sheet"></span><p>Otimize o lote para visualizar as chapas.</p></div>
+              </div>
+            </div>
+
+            <aside class="sheet-details" aria-labelledby="sheet-title">
+              <div class="sheet-selector">
+                <label for="sheet-select" id="sheet-title">Chapa em exibição</label>
+                <select id="sheet-select" disabled aria-label="Selecionar chapa"><option>—</option></select>
+              </div>
+              <div class="sheet-fill">
+                <div><span>Aproveitamento</span><strong id="sheet-yield">—</strong></div>
+                <div class="bar" id="sheet-bar" role="progressbar" aria-label="Aproveitamento da chapa" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div>
+                <p id="sheet-used">—</p>
+                <p id="sheet-pattern" class="pattern" hidden></p>
+              </div>
+              <div class="legend">
+                <h3>Peças nesta chapa</h3>
+                <ul id="legend"></ul>
+              </div>
+            </aside>
+          </div>
+
+          <footer class="plan-footer">
+            <span id="border-legend"><i class="dash"></i> Limite da borda livre</span>
+            <span id="canvas-scale"><span data-icon="ruler"></span> Cotas em mm · escala proporcional</span>
+          </footer>
+        </section>
+
+        <section class="card comparison" aria-labelledby="comparison-title">
+          <header>
+            <h2 id="comparison-title">Comparação de estratégias</h2>
+            <p>Menos chapas, maior sobra reta e, em caso de empate, menos padrões.</p>
+          </header>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th scope="col">Estratégia</th><th scope="col">Chapas</th><th scope="col">Aprov.</th><th scope="col">Maior sobra reta</th><th scope="col">Padrões</th></tr></thead>
+              <tbody id="strategies"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <dialog id="sheet-dialog" aria-labelledby="size-title">
+    <form id="size-form">
+      <header class="dialog-header">
+        <div><h2 id="size-title">Parâmetros da chapa</h2><p>A borda livre é aplicada nos quatro lados.</p></div>
+        <button class="icon-button" type="button" data-close="sheet-dialog" aria-label="Fechar"><span data-icon="close"></span></button>
+      </header>
+      <div class="dialog-body">
+        <div class="field-grid">
+          <label>Largura da chapa (mm)<input id="sheet-width" type="number" step="any" required></label>
+          <label>Altura da chapa (mm)<input id="sheet-height" type="number" step="any" required></label>
+        </div>
+        <div class="field-grid">
+          <label>Borda livre (mm)<input id="sheet-border" type="number" min="0" step="any" required></label>
+          <label>Distância entre peças (mm)<input id="sheet-gap" type="number" min="0" step="any" required></label>
+        </div>
+        <label>Passo do giro livre (°)<input id="sheet-step" type="number" min="1" max="90" step="any" required></label>
+        <p class="field-help">Passos menores testam mais ângulos e podem aumentar o tempo de cálculo.</p>
+        <p class="form-error" id="size-error" role="alert" hidden></p>
+      </div>
+      <footer class="dialog-footer">
+        <button class="button secondary" id="reset-sheet" type="button">Usar padrão</button>
+        <span class="spacer"></span>
+        <button class="button secondary" type="button" data-close="sheet-dialog">Cancelar</button>
+        <button class="button primary" type="submit">Aplicar parâmetros</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="piece-dialog" aria-labelledby="piece-title">
+    <form id="piece-form">
+      <header class="dialog-header">
+        <div><h2 id="piece-title">Nova peça</h2><p>Use as medidas da peça na orientação original.</p></div>
+        <button class="icon-button" type="button" data-close="piece-dialog" aria-label="Fechar"><span data-icon="close"></span></button>
+      </header>
+      <div class="dialog-body">
+        <label>Nome da peça<input id="piece-name" maxlength="70" placeholder="Ex. Testeira" required></label>
+        <div class="field-grid">
+          <label>Quantidade<input id="piece-qty" type="number" min="1" max="500" step="1" value="1" required></label>
+          <label>Orientação<select id="piece-orientation"><option value="fixed">Fixa · 0°/180°</option><option value="free">Rotação livre</option></select></label>
+        </div>
+        <p class="field-help" id="orientation-help">Mantém o sentido das flautas na orientação cadastrada.</p>
+        <div class="field-grid">
+          <label>Giro da geometria (°)<input id="piece-turn" type="number" step="any" value="0" required></label>
+          <div class="rotation-actions"><button class="button secondary" type="button" id="rotate-left">−90°</button><button class="button secondary" type="button" id="rotate-right">+90°</button></div>
+        </div>
+        <p class="field-help">O giro é aplicado ao salvar e define a nova posição de 0° da peça.</p>
+        <label>Geometria<select id="piece-kind"><option value="rect">Retângulo</option><option value="poly">Contorno personalizado</option></select></label>
+        <div class="field-grid" id="rectangle-fields">
+          <label>Largura (mm)<input id="piece-width" type="number" min="0.001" step="any" placeholder="500"></label>
+          <label>Altura (mm)<input id="piece-height" type="number" min="0.001" step="any" placeholder="790"></label>
+        </div>
+        <div id="polygon-fields" hidden>
+          <label>Contorno externo (x, y em mm)
+            <textarea id="piece-points" rows="4" placeholder="0; 0&#10;410; 0&#10;410; 180&#10;0; 350"></textarea>
+          </label>
+          <p class="field-help">Um par x; y por linha. O último ponto se conecta ao primeiro.</p>
+          <label class="holes-label">Recortes internos <span class="optional">opcional</span>
+            <textarea id="piece-holes" rows="2" placeholder="Separe cada recorte por uma linha em branco."></textarea>
+          </label>
+        </div>
+        <details>
+          <summary>Linhas abertas</summary>
+          <label>Traçados internos (x, y em mm)
+            <textarea id="piece-paths" rows="3" placeholder="Um par x; y por linha. Separe os traçados por uma linha em branco."></textarea>
+          </label>
+        </details>
+        <p class="form-error" id="piece-error" role="alert" hidden></p>
+      </div>
+      <footer class="dialog-footer">
+        <button class="button danger" id="delete" type="button" hidden><span data-icon="trash"></span> Remover peça</button>
+        <span class="spacer"></span>
+        <button class="button secondary" type="button" data-close="piece-dialog">Cancelar</button>
+        <button class="button primary" type="submit">Salvar peça</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="import-dialog" aria-labelledby="import-title">
+    <form id="import-form">
+      <header class="dialog-header">
+        <div><h2 id="import-title">Importar peças</h2><p>Adicione geometrias ao lote atual.</p></div>
+        <button class="icon-button" type="button" data-close="import-dialog" aria-label="Fechar"><span data-icon="close"></span></button>
+      </header>
+      <div class="dialog-body">
+        <label class="drop" id="drop-zone">
+          <span class="section-icon" data-icon="upload"></span>
+          <strong id="import-name">Selecionar ou arrastar arquivo</strong>
+          <span>DXF, CSV ou JSON · até 5 MB</span>
+          <input id="import-file" type="file" accept=".dxf,.csv,.json,text/csv,application/json" aria-label="Arquivo de peças">
+        </label>
+        <div class="formats">
+          <div><strong>DXF ASCII</strong><p>Polilinhas 2D, círculos, SPLINEs com pontos de controle, linhas e arcos. Linhas abertas ligadas a uma peça são preservadas na camada CORTE_ABERTO. Cada contorno externo entra com quantidade 1. Subdividimos curvas em segmentos com desvio de até 0,15 mm.</p></div>
+          <div><strong>CSV e JSON</strong><p>Use os modelos para importar medidas em mm, quantidades, orientações e polígonos.</p>
+            <div class="templates"><button type="button" class="text-button" id="template-csv">Baixar CSV</button><button type="button" class="text-button" id="template-json">Baixar JSON</button></div>
+          </div>
+        </div>
+        <p class="form-error" id="import-error" role="alert" hidden></p>
+      </div>
+      <footer class="dialog-footer">
+        <span class="spacer"></span>
+        <button class="button secondary" type="button" data-close="import-dialog">Cancelar</button>
+        <button class="button primary" id="import-submit" type="submit" disabled>Adicionar ao lote</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title">
+    <form method="dialog">
+      <header class="dialog-header">
+        <div><h2 id="confirm-title"></h2><p id="confirm-text"></p></div>
+        <button class="icon-button" type="submit" value="cancel" aria-label="Fechar"><span data-icon="close"></span></button>
+      </header>
+      <footer class="dialog-footer">
+        <span class="spacer"></span>
+        <button class="button secondary" type="submit" value="cancel" autofocus>Cancelar</button>
+        <button class="button primary" id="confirm-button" type="submit" value="confirm">Confirmar</button>
+      </footer>
+    </form>
+  </dialog>
+</body>
+</html>
