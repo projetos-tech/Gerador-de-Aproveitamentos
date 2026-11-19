@@ -304,31 +304,34 @@ export function exportDxf(sheets, size) {
   const section = name => { pair(0, 'SECTION'); pair(2, name); };
   const end = () => pair(0, 'ENDSEC');
   const number = value => Number(value.toFixed(9));
-  let handle = 256;
-  const nextHandle = () => (handle++).toString(16).toUpperCase();
   const layers = [['0', 7], ['CORTE', 7], ['CORTE_ABERTO', 7], ['CHAPA_REFERENCIA', 8], ['BORDA_REFERENCIA', 9]];
   section('HEADER');
-  pair(9, '$ACADVER'); pair(1, 'AC1015');
-  pair(9, '$INSUNITS'); pair(70, 4);
-  pair(9, '$MEASUREMENT'); pair(70, 1);
+  pair(9, '$ACADVER'); pair(1, 'AC1009');
+  pair(9, '$LUNITS'); pair(70, 2);
+  pair(9, '$LUPREC'); pair(70, 3);
   end();
   section('TABLES');
-  pair(0, 'TABLE'); pair(2, 'LTYPE'); pair(5, nextHandle()); pair(100, 'AcDbSymbolTable'); pair(70, 1);
-  pair(0, 'LTYPE'); pair(5, nextHandle()); pair(100, 'AcDbSymbolTableRecord'); pair(100, 'AcDbLinetypeTableRecord');
-  pair(2, 'CONTINUOUS'); pair(70, 0); pair(3, 'Solid line'); pair(72, 65); pair(73, 0); pair(40, 0);
+  pair(0, 'TABLE'); pair(2, 'LTYPE'); pair(70, 1);
+  pair(0, 'LTYPE'); pair(2, 'CONTINUOUS'); pair(70, 0); pair(3, 'Solid line');
+  pair(72, 65); pair(73, 0); pair(40, 0);
   pair(0, 'ENDTAB');
-  pair(0, 'TABLE'); pair(2, 'LAYER'); pair(5, nextHandle()); pair(100, 'AcDbSymbolTable'); pair(70, layers.length);
+  pair(0, 'TABLE'); pair(2, 'LAYER'); pair(70, layers.length);
   for (const [name, color] of layers) {
-    pair(0, 'LAYER'); pair(5, nextHandle()); pair(100, 'AcDbSymbolTableRecord'); pair(100, 'AcDbLayerTableRecord');
-    pair(2, name); pair(70, 0); pair(62, color); pair(6, 'CONTINUOUS');
+    pair(0, 'LAYER'); pair(2, name); pair(70, 0); pair(62, color); pair(6, 'CONTINUOUS');
   }
   pair(0, 'ENDTAB');
   end();
+  section('BLOCKS');
+  end();
   section('ENTITIES');
   function polyline(points, layer, dx, dy, closed = true) {
-    pair(0, 'LWPOLYLINE'); pair(5, nextHandle()); pair(100, 'AcDbEntity'); pair(8, layer);
-    pair(100, 'AcDbPolyline'); pair(90, points.length); pair(70, closed ? 1 : 0);
-    for (const [x, y] of points) { pair(10, number(dx + x)); pair(20, number(dy - y)); }
+    pair(0, 'POLYLINE'); pair(8, layer); pair(66, 1);
+    pair(10, 0); pair(20, 0); pair(30, 0); pair(70, closed ? 1 : 0);
+    for (const [x, y] of points) {
+      pair(0, 'VERTEX'); pair(8, layer);
+      pair(10, number(dx + x)); pair(20, number(dy - y)); pair(30, 0); pair(70, 0);
+    }
+    pair(0, 'SEQEND'); pair(8, layer);
   }
   sheets.forEach((sheet, index) => {
     const dx = (width + 150) * (index % 4), dy = height - (height + 150) * Math.floor(index / 4);
