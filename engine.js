@@ -1,4 +1,4 @@
-import { EPS, MAX_PIECES, bounds, edges, conflict, sheetDimensions } from './geometry.js';
+import { EPS, MAX_PIECES, bounds, edges, conflict, signedArea, sheetDimensions } from './geometry.js';
 
 export const STRATEGIES = {
   grid: { name: 'Grade por dimensões', description: 'Prioriza peças grandes e alinha pelas bordas das caixas envolventes.' },
@@ -25,6 +25,37 @@ function getAngles(piece, step) {
   const axes = [...new Set(segments.map(({ angle }) => round(normAngle(-angle) % 90)))].slice(0, 5);
   const alignment = axes.flatMap(angle => [angle, angle + 90, angle + 180, angle + 270]);
   return [...new Set([...regular, ...alignment])].sort((a, b) => a - b);
+}
+
+// Canonical counterclockwise traversal gives each edge an outward right normal.
+function diagonalEdges(ring) {
+  const points = signedArea(ring) > 0 ? ring : [...ring].reverse();
+  return edges(points).flatMap(({ a, b }) => {
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const length = Math.hypot(dx, dy);
+    if (Math.abs(dx) < EPS || Math.abs(dy) < EPS || length < EPS) return [];
+    return [{ a, length, tx: dx / length, ty: dy / length }];
+  }).sort((a, b) => b.length - a.length).slice(0, 12);
+}
+
+function alignDiagonals(other, variant, limits, add) {
+  const { border, right, bottom, gap } = limits;
+  for (const fixed of other.diagonals) {
+    const { tx, ty } = fixed;
+    for (const moving of variant.diagonals) {
+      if (Math.hypot(tx + moving.tx, ty + moving.ty) > 1e-8) continue;
+      const x = other.x + fixed.a[0] - moving.a[0] + gap * ty;
+      const y = other.y + fixed.a[1] - moving.a[1] - gap * tx;
+      // Slide along the offset line, including flush positions and sheet boundaries.
+      const stops = [moving.length, fixed.length, (moving.length + fixed.length) / 2,
+        (border - x) / tx, (right - x) / tx, (border - y) / ty, (bottom - y) / ty,
+        (other.x - x) / tx, (other.x + other.width - variant.width - x) / tx,
+        (other.y - y) / ty, (other.y + other.height - variant.height - y) / ty];
+      for (const t of stops) {
+        if (t > EPS && t < fixed.length + moving.length - EPS) add(x + t * tx, y + t * ty);
+      }
+    }
+  }
 }
 
 function makeVariants(piece, usable) {
@@ -54,7 +85,7 @@ function makeVariants(piece, usable) {
     const step = Math.ceil(outer.length / 9);
     return [{
       id: piece.id, name: piece.name, angle, area: piece.area, width, height, outer, holes, paths,
-      rect, edges: edges(outer), anchors: outer.filter((_, i) => i % step === 0)
+      rect, diagonals: diagonalEdges(outer), edges: edges(outer), anchors: outer.filter((_, i) => i % step === 0)
     }];
   });
 }
@@ -87,6 +118,9 @@ function positions(sheet, variant, mode, usable) {
   add(border, bottom);
   const touching = mode === 'grid' ? [] : sheet.placements.length <= 13 ? sheet.placements : sheet.placements.slice(-10);
   for (const other of sheet.placements) {
+    if (variant.diagonals.length && other.diagonals.length) {
+      alignDiagonals(other, variant, { border, right, bottom, gap }, add);
+    }
     const side = other.x + other.width + gap, below = other.y + other.height + gap;
     const left = other.x - gap - variant.width, above = other.y - gap - variant.height;
     for (const x of [side, left, other.x, other.x + other.width - variant.width]) if (x >= border - EPS && x <= right + EPS) xs.add(x);
@@ -218,7 +252,8 @@ function repeated(types, fallback, usable, onStep) {
     if (!best || rank(sheets, best, usable) < 0) best = sheets;
   }
   onStep(1);
-  if (best) return best;
+  if (best && (countPatterns(best) < countPatterns(fallback) ||
+      (countPatterns(best) === countPatterns(fallback) && rank(best, fallback, usable) <= 0))) return best;
   // Group any identical layouts the contour strategy found and keep those copies together.
   return [...fallback].sort((a, b) => a.used - b.used || (sheetKey(a) < sheetKey(b) ? -1 : sheetKey(a) > sheetKey(b) ? 1 : 0)).reverse();
 }
