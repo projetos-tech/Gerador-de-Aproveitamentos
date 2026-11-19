@@ -3,7 +3,7 @@ import { EPS, MAX_PIECES, bounds, edges, conflict, sheetDimensions } from './geo
 export const STRATEGIES = {
   grid: { name: 'Grade por dimensões', description: 'Prioriza peças grandes e alinha pelas bordas das caixas envolventes.' },
   contour: { name: 'Encaixe por contorno', description: 'Testa várias ordens e aproxima vértices para ocupar reentrâncias.' },
-  repeat: { name: 'Padrão repetido', description: 'Busca uma chapa modelo para replicar a proporção do lote.' }
+  repeat: { name: 'Chapa modelo repetida', description: 'Busca uma chapa modelo para replicar a proporção do lote.' }
 };
 
 const formatSize = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 6 });
@@ -269,8 +269,8 @@ export function optimize(pieces, progress = () => {}, size) {
   const runs = [[byFootprint, 'tight'], [bySide, 'tight'], [byWidth, 'wide']];
   const contour = runs.map(([order, mode], i) => pack(expand(ordered(types, order)), mode, usable,
     fraction => progress('Encaixe por contorno', 0.2 + (i + fraction) * 0.21))).sort((a, b) => rank(a, b, usable))[0];
-  progress('Padrão repetido', 0.84);
-  const repeat = repeated(types, contour, usable, fraction => progress('Padrão repetido', 0.84 + fraction * 0.15));
+  progress('Chapa modelo repetida', 0.84);
+  const repeat = repeated(types, contour, usable, fraction => progress('Chapa modelo repetida', 0.84 + fraction * 0.15));
   const plans = [{ id: 'grid', raw: grid }, { id: 'contour', raw: contour }, { id: 'repeat', raw: repeat }];
   const bestId = [...plans].sort((a, b) => rank(a.raw, b.raw, usable))[0].id;
   for (const plan of plans) validateLayout(plan.raw, types, size);
@@ -280,4 +280,86 @@ export function optimize(pieces, progress = () => {}, size) {
       id, sheets: compact(raw), patterns: countPatterns(raw), offcut: largestOffcut(raw, usable)
     }))
   };
+}
+
+export function planStock(pieces, progress, size, stock = [], objective = 'lot') {
+  const remaining = pieces.map(p => ({ ...p }));
+  const reused = [];
+  for (const entry of stock) {
+    const dimensions = sheetDimensions({ ...size, width: entry.width, height: entry.height });
+    const usable = usableArea(dimensions);
+    const types = remaining.map(p => ({ ...p, variants: makeVariants(p, usable) })).sort(byFootprint);
+    for (let copy = 0; copy < entry.quantity; copy++) {
+      const sheet = newSheet();
+      for (const type of types) {
+        const source = remaining.find(p => p.id === type.id);
+        while (source.quantity && type.variants.length) {
+          const spot = findSpot(sheet, type, 'tight', usable);
+          if (!spot) break;
+          place(sheet, spot, usable.border);
+          source.quantity--;
+        }
+      }
+      if (!sheet.placements.length) break;
+      reused.push({ ...compact([sheet])[0], size: dimensions, stock: true });
+    }
+  }
+  const balance = remaining.filter(p => p.quantity);
+  const result = balance.length ? optimize(balance, progress, size) :
+    { bestId: 'grid', plans: Object.keys(STRATEGIES).map(id => ({ id, sheets: [] })) };
+  for (const plan of result.plans) {
+    plan.sheets = [...structuredClone(reused), ...plan.sheets.map(sheet => ({ ...sheet, size }))];
+    refreshPatterns(plan);
+  }
+  if (objective === 'repeat') result.bestId = [...result.plans].sort((a,b) =>
+    a.patterns - b.patterns || a.sheets.length - b.sheets.length || Number(b.id === 'repeat') - Number(a.id === 'repeat'))[0].id;
+  return result;
+}
+
+export function refreshPatterns(plan) {
+  const keys = plan.sheets.map(s => [s.size.width,s.size.height,sheetKey(s)].join('/'));
+  const distinct = [...new Set(keys)];
+  plan.patterns = distinct.length;
+  plan.offcut = 0;
+  plan.sheets.forEach((s,i) => {
+    s.pattern = distinct.indexOf(keys[i]) + 1;
+    s.copies = keys.filter(k => k === keys[i]).length;
+    s.used = s.placements.reduce((sum,p) => sum + p.area,0);
+    const cut = freeRectangle(s);
+    plan.offcut = Math.max(plan.offcut, cut.width * cut.height);
+  });
+}
+
+// Largest axis-aligned rectangle outside the expanded part bounding boxes.
+export function freeRectangle(sheet) {
+  const {width,height,border,gap} = sheet.size;
+  const boxes = sheet.placements.map(p => ({
+    l: Math.max(border,p.x-gap), r: Math.min(width-border,p.x+p.width+gap),
+    t: Math.max(border,p.y-gap), b: Math.min(height-border,p.y+p.height+gap)
+  }));
+  const xs = [...new Set([border,width-border,...boxes.flatMap(b=>[b.l,b.r])])].sort((a,b)=>a-b);
+  const heights = xs.slice(1).map(()=>0);
+  const ys = [...new Set([border,height-border,...boxes.flatMap(b=>[b.t,b.b])])].sort((a,b)=>a-b);
+  let best = {width:0,height:0};
+  for (let j=1;j<ys.length;j++) {
+    const diff = new Int32Array(xs.length);
+    const indices = new Map(xs.map((x,i)=>[x,i]));
+    for (const box of boxes) if (box.t < ys[j] && box.b > ys[j-1]) {
+      diff[indices.get(box.l)]++; diff[indices.get(box.r)]--;
+    }
+    let occupied=0;
+    const stack=[];
+    for(let i=0;i<=heights.length;i++) {
+      occupied+=diff[i];
+      const h=i===heights.length ? 0 : (heights[i]=occupied ? 0 : heights[i]+ys[j]-ys[j-1]);
+      let left=i;
+      while(stack.length && stack.at(-1).h>h) {
+        const prev=stack.pop(); left=prev.left;
+        const w=xs[i]-xs[left];
+        if(w*prev.h>best.width*best.height) best={width:w,height:prev.h};
+      }
+      if(h && stack.at(-1)?.h!==h) stack.push({h,left});
+    }
+  }
+  return best;
 }

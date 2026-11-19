@@ -208,7 +208,7 @@ export function rotatePiece(piece, angle) {
   });
 }
 
-function pointDistance2(p, a, b) {
+export function pointDistance2(p, a, b) {
   const dx = b[0] - a[0], dy = b[1] - a[1];
   const length = dx * dx + dy * dy;
   const t = Math.min(1, Math.max(0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length));

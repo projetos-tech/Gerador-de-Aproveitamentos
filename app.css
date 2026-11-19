@@ -241,3 +241,5 @@ textarea { resize: vertical; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; }
 }
+.tools,.actions,.test-row {display:flex;align-items:center;flex-wrap:wrap;gap:12px}
+.tools {padding:14px 18px;margin-bottom:18px}.tools label,.extra label{display:flex;align-items:center;gap:8px;font-size:14px}.tools button,.extra button,.extra select,.tools select,.extra input:not([type=checkbox]){border:1px solid #cbd0e5;border-radius:7px;padding:8px;background:white;color:#202845;font:inherit}.tools button,.extra button{cursor:pointer}.extra{padding:22px;max-height:85vh;overflow:auto}.extra h2{margin:0 0 18px}.extra .actions{justify-content:flex-end;margin-top:16px}.extra .primary{color:white;background:#5140ce}.test-row{padding:8px 0;border-bottom:1px solid #e3e5ef}.extra p,#details{font-size:14px;line-height:1.5}.extra input[type=number]{width:96px}.extra svg{max-width:75px;height:60px}.extra select{max-width:100%}#extra-error{color:#ab1834}#details{white-space:pre-line}.drawing g[data-part]{cursor:grab;touch-action:none}

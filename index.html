@@ -31,6 +31,7 @@
       <button class="button secondary example-button" id="example" type="button"><span data-icon="flask"></span> Carregar exemplo</button>
     </section>
 
+    <section class="card tools"><button id="save-project">Salvar projeto</button><button id="load-project">Abrir projeto</button><input hidden type="file" id="project-file" accept=".json"><label>Prioridade <select id="objective"><option value="lot">Usar menos chapas</option><option value="repeat">Usar menos padrões de corte</option></select></label><button id="stock">Chapas e retalhos</button><label>Sentido do material <select id="grain"><option value="">Sem indicação</option><option value="v">↕ Vertical</option><option value="h">↔ Horizontal</option></select></label></section>
     <div class="workspace">
       <aside class="sidebar" aria-label="Lote e dimensões">
         <section class="card material-card" aria-labelledby="material-title">
@@ -99,7 +100,7 @@
               <div class="plan-title-row"><h2 id="plan-title">Plano de corte</h2><span class="best-tag" id="plan-badge" hidden><span data-icon="check"></span> Melhor resultado</span></div>
               <p id="plan-caption">Aguardando cálculo</p>
             </div>
-            <button class="button primary export" id="export" type="button" disabled title="Exportar o melhor plano em milímetros"><span data-icon="file"></span> Exportar DXF</button>
+            <button class="button primary export" id="export" type="button" disabled title="Conferir o plano selecionado"><span data-icon="file"></span> Conferir e exportar</button>
           </header>
 
           <div class="plan-content">
@@ -115,7 +116,7 @@
             </div>
 
             <aside class="sheet-details" aria-labelledby="sheet-title">
-              <div class="sheet-selector">
+              <p id="details"></p><div class="sheet-selector">
                 <label for="sheet-select" id="sheet-title">Chapa em exibição</label>
                 <select id="sheet-select" disabled aria-label="Selecionar chapa"><option>—</option></select>
               </div>
@@ -140,8 +141,8 @@
 
         <section class="card comparison" aria-labelledby="comparison-title">
           <header>
-            <h2 id="comparison-title">Comparação de estratégias</h2>
-            <p>Menos chapas, maior sobra reta e, em caso de empate, menos padrões.</p>
+            <h2 id="comparison-title">Planos calculados</h2>
+            <p id="ranking-note"></p><p>Selecione um plano para visualizar e exportar.</p>
           </header>
           <div class="table-scroll">
             <table>
@@ -273,5 +274,6 @@
       </footer>
     </form>
   </dialog>
+<dialog id="extra"><div class="extra"><h2 id="extra-title"></h2><div id="extra-body"></div><p id="extra-error" role="alert"></p><div class="actions"><button id="extra-close">Fechar</button><button class="button primary" id="extra-ok">Aplicar</button></div></div></dialog>
 </body>
 </html>

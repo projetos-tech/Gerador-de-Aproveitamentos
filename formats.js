@@ -297,14 +297,14 @@ export function readFile(text, filename) {
   });
 }
 
-export function exportDxf(sheets, size) {
-  const { width, height, border } = sheetDimensions(size);
+export function exportDxf(sheets, size, guides = true, roles = {}) {
+  let offset = 0;
   const output = [];
   const pair = (code, value) => output.push(code, value);
   const section = name => { pair(0, 'SECTION'); pair(2, name); };
   const end = () => pair(0, 'ENDSEC');
   const number = value => Number(value.toFixed(9));
-  const layers = [['0', 7], ['CORTE', 7], ['CORTE_ABERTO', 7], ['CHAPA_REFERENCIA', 8], ['BORDA_REFERENCIA', 9]];
+  const layers = [['0', 7], ['CORTE', 7], ['CORTE_ABERTO', 7], ['VINCO', 4], ['REFERENCIA', 8], ['CHAPA_REFERENCIA', 8], ['BORDA_REFERENCIA', 9]];
   section('HEADER');
   pair(9, '$ACADVER'); pair(1, 'AC1009');
   pair(9, '$LUNITS'); pair(70, 2);
@@ -334,11 +334,15 @@ export function exportDxf(sheets, size) {
     pair(0, 'SEQEND'); pair(8, layer);
   }
   sheets.forEach((sheet, index) => {
-    const dx = (width + 150) * (index % 4), dy = height - (height + 150) * Math.floor(index / 4);
-    polyline([[0,0],[width,0],[width,height],[0,height]], 'CHAPA_REFERENCIA', dx, dy);
-    if (border > 0) polyline(rectangle(width - 2 * border, height - 2 * border), 'BORDA_REFERENCIA', dx + border, dy - border);
+    const {width,height,border} = sheetDimensions(sheet.size ?? size);
+    const dx = offset, dy = height; offset += width + 150;
+    if (guides) polyline([[0,0],[width,0],[width,height],[0,height]], 'CHAPA_REFERENCIA', dx, dy);
+    if (guides && border > 0) polyline(rectangle(width - 2 * border, height - 2 * border), 'BORDA_REFERENCIA', dx + border, dy - border);
     for (const part of sheet.placements) {
-      for (const path of part.paths ?? []) polyline(path, 'CORTE_ABERTO', dx + part.x, dy - part.y, false);
+      (part.paths ?? []).forEach((path,i) => {
+        const layer = roles[part.id]?.[i] ?? 'CORTE_ABERTO';
+        if (layer !== 'REFERENCIA' || guides) polyline(path,layer,dx+part.x,dy-part.y,false);
+      });
       for (const ring of [...part.holes, part.outer]) polyline(ring, 'CORTE', dx + part.x, dy - part.y);
     }
   });

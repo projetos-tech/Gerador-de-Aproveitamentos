@@ -1,5 +1,5 @@
-import { DEFAULT_SHEET, MAX_PIECES, makePiece, rotatePiece, serialPiece, sheetDimensions } from './geometry.js';
-import { STRATEGIES, optimize } from './engine.js';
+import { DEFAULT_SHEET, MAX_PIECES, makePiece, rotatePiece, serialPiece, sheetDimensions, pointDistance2 } from './geometry.js';
+import { STRATEGIES, planStock, validateLayout, freeRectangle, refreshPatterns } from './engine.js';
 import { EXAMPLE, readFile, exportDxf } from './formats.js';
 
 const svgNS = 'http://www.w3.org/2000/svg';
@@ -96,7 +96,10 @@ function color(id) {
   return palette[Math.max(0, pieces.findIndex(p => p.id === id)) % palette.length];
 }
 const squareMetres = n => decimal.format(n / 1e6) + ' m²';
-const sheetArea = () => sheetSize.width * sheetSize.height;
+const sheetArea = s => s.size.width * s.size.height;
+const grossArea = p => p.sheets.reduce((sum,s)=>sum+sheetArea(s),0);
+let stock = [], roles = {}, pending = [], selected = null;
+const objective = () => $('objective').value;
 const lotQuantity = () => pieces.reduce((sum, piece) => sum + piece.quantity, 0);
 const plan = () => result?.plans.find(p => p.id === active);
 
@@ -164,6 +167,9 @@ function renderLot() {
 }
 
 function renderStrategies() {
+  $('ranking-note').textContent = objective() === 'repeat'
+    ? 'Recomendado pela menor quantidade de padrões de corte. Em caso de empate, prioriza menos chapas.'
+    : 'Recomendado pela menor quantidade de chapas. O desempate considera a sobra reta e depois a quantidade de padrões.';
   const tbody = $('strategies');
   tbody.replaceChildren();
   for (const [id, strategy] of Object.entries(STRATEGIES)) {
@@ -183,17 +189,17 @@ function renderStrategies() {
       $('strategies').querySelector('[aria-pressed="true"]')?.focus();
     });
     name.append(button);
-    if (result?.bestId === id) name.append(node('span', 'Melhor', 'strategy-mark'));
+    if (result?.bestId === id) name.append(node('span', 'Recomendado', 'strategy-mark'));
     row.append(name);
     const used = candidate?.sheets.reduce((sum, sheet) => sum + sheet.used, 0);
-    for (const value of [candidate?.sheets.length, candidate && percent.format(used / (candidate.sheets.length * sheetArea())),
+    for (const value of [candidate?.sheets.length, candidate && percent.format(used / (grossArea(candidate))),
       candidate && squareMetres(candidate.offcut), candidate?.patterns]) row.append(node('td', value ?? '—'));
     tbody.append(row);
   }
 }
 
 function drawSheet(sheet) {
-  const { width, height, border } = sheetSize;
+  const { width, height, border } = sheet.size;
   const guide = Math.max(width / DEFAULT_SHEET.width, height / DEFAULT_SHEET.height);
   const widthLabel = sizeNumber.format(width) + ' mm', heightLabel = sizeNumber.format(height) + ' mm';
   const widthTag = Math.max(294, widthLabel.length * 32) * guide;
@@ -252,6 +258,7 @@ function drawSheet(sheet) {
       }, int.format(part.angle) + '°');
       group.append(label, angle);
     }
+    bindPart(group, drawing, part, sheet);
     parts.append(group);
   }
   drawing.append(parts);
@@ -287,6 +294,7 @@ function renderSheet() {
   const legend = $('legend');
   legend.replaceChildren();
   if (!sheet) {
+    $('details').textContent='';
     $('sheet-yield').textContent = '—'; $('sheet-used').textContent = '—'; $('sheet-pattern').hidden = true;
     bar.setAttribute('aria-valuenow', '0'); bar.firstElementChild.style.width = '0%';
     const empty = node('div', null, 'empty-canvas');
@@ -298,9 +306,9 @@ function renderSheet() {
     updateZoom();
     return;
   }
-  const ratio = sheet.used / sheetArea();
+  const ratio = sheet.used / sheetArea(sheet);
   $('sheet-yield').textContent = percent.format(ratio);
-  $('sheet-used').textContent = squareMetres(sheet.used) + ' / ' + squareMetres(sheetArea());
+  $('sheet-used').textContent = squareMetres(sheet.used) + ' / ' + squareMetres(sheetArea(sheet));
   $('sheet-pattern').hidden = sheet.copies === 1;
   $('sheet-pattern').textContent = 'Padrão ' + sheet.pattern + ' · ' + sheet.copies + ' chapas iguais';
   bar.firstElementChild.style.width = (ratio * 100) + '%';
@@ -317,12 +325,13 @@ function renderSheet() {
     legend.append(item);
   }
   drawSheet(sheet);
+  sheetDetails(sheet);
 }
 
 function renderResults() {
   const current = plan();
   const used = current?.sheets.reduce((sum, sheet) => sum + sheet.used, 0);
-  const gross = current ? current.sheets.length * sheetArea() : 0;
+  const gross = current ? grossArea(current) : 0;
   setUnit('metric-sheets', current ? current.sheets.length : '—');
   setUnit('metric-area', current ? decimal.format(used / 1e6) : '—', current ? 'm²' : '');
   setUnit('metric-yield', current ? percent.format(used / gross) : '—');
@@ -330,13 +339,13 @@ function renderResults() {
   $('plan-badge').hidden = !current || current.id !== result.bestId;
   $('plan-caption').textContent = current ? STRATEGIES[current.id].name : busy ? 'Comparando estratégias…' : 'Aguardando cálculo';
   $('export').disabled = !result;
-  $('export').title = result ? 'Exportar o melhor plano: ' + STRATEGIES[result.bestId].name + ' · DXF em milímetros' : 'Otimize o lote para exportar o DXF.';
+  $('export').title = result ? 'Conferir o plano selecionado: ' + STRATEGIES[active].name + ' · DXF em milímetros' : 'Otimize o lote para exportar o DXF.';
   const select = $('sheet-select');
   select.replaceChildren();
   select.disabled = !current;
   if (current) {
     current.sheets.forEach((sheet, index) => {
-      const opt = node('option', 'Chapa ' + String(index + 1).padStart(2, '0') + ' · ' + percent.format(sheet.used / sheetArea()));
+      const opt = node('option', 'Chapa ' + String(index + 1).padStart(2, '0') + ' · ' + percent.format(sheet.used / sheetArea(sheet)));
       opt.value = index;
       select.append(opt);
     });
@@ -376,7 +385,7 @@ function run() {
     worker = null;
     setTimeout(() => {
       if (ticket !== runId) return;
-      try { finish(null, optimize(pieces, undefined, sheetSize)); }
+      try { finish(null, planStock(pieces, undefined, sheetSize, stock, objective())); }
       catch (error) { finish(error.message); }
     }, 0);
   }
@@ -398,7 +407,7 @@ function run() {
       event.preventDefault();
     };
     current.onmessageerror = () => { if (current === worker) fallback(); };
-    current.postMessage({ pieces, sheetSize });
+    current.postMessage({ pieces, sheetSize, stock, objective: objective() });
   } catch {
     fallback();
   }
@@ -572,8 +581,8 @@ $('import-form').addEventListener('submit', async event => {
     const source = await file.text();
     if (!$('import-dialog').open || file !== importFile) return;
     const incoming = readFile(source, file.name).map(piece => ({ ...piece, id: newId() }));
-    setPieces([...pieces, ...incoming]);
-    $('import-dialog').close();
+    pending = incoming;
+    $('import-dialog').close(); reviewImport();
   } catch (error) {
     if (file !== importFile) return;
     errorMessage($('import-error'), error.message);
@@ -587,16 +596,181 @@ for (const button of document.querySelectorAll('[data-close]')) button.addEventL
 
 $('optimize').addEventListener('click', run);
 $('sheet-select').addEventListener('change', event => { sheetIndex = Number(event.target.value); zoom = 1; renderSheet(); });
-$('export').addEventListener('click', () => {
-  const best = result?.plans.find(plan => plan.id === result.bestId);
-  if (best) download('plano-polionda-' + best.sheets.length + '-chapas.dxf', exportDxf(best.sheets, sheetSize), 'application/dxf');
-});
-
 $('zoom-in').addEventListener('click', () => { zoom = Math.min(2.5, zoom + .25); updateZoom(); });
 $('zoom-out').addEventListener('click', () => { zoom = Math.max(.6, zoom - .25); updateZoom(); });
 $('zoom-reset').addEventListener('click', () => { zoom = 1; updateZoom(); $('canvas').scrollTo(0, 0); });
 new ResizeObserver(updateZoom).observe($('canvas'));
 
 showIcons();
+restoreSettings();
 if (pieces.length) run();
 else { renderLot(); renderResults(); }
+
+function report(title, label, action) {
+  $('extra-title').textContent=title;
+  $('extra-error').textContent='';
+  const body=$('extra-body'); body.replaceChildren();
+  $('extra-close').onclick=()=>$('extra').close();
+  $('extra-ok').textContent=label;
+  $('extra-ok').onclick=()=>{try{action();$('extra').close()}catch(e){$('extra-error').textContent=e.message}};
+  if (!$('extra').open) $('extra').showModal();
+  return body;
+}
+function field(parent,title,element) {
+  const label=node('label',title); label.append(element); parent.append(label); return element;
+}
+function numberInput(value) {
+  const el=node('input');el.type='number';el.step='any';el.value=value;return el;
+}
+function options(items,value) {
+  const el=node('select');
+  for(const [key,name] of items){const opt=node('option',name);opt.value=key;el.append(opt)}
+  el.value=value;return el;
+}
+function reviewImport() {
+  const chosen=[];
+  const body=report('Conferir peças importadas','Adicionar ao lote',()=>{
+    const add=chosen.filter(r=>r.check.checked);
+    if(!add.length) throw Error('Selecione pelo menos uma peça.');
+    setPieces([...pieces,...add.map(r=>r.p)]);
+    for(const r of add) roles[r.p.id]=r.paths.map(el=>el.value);
+    saveSettings();
+  });
+  pending.forEach((p,i)=>{
+    const row=node('div',null,'test-row'),check=node('input');check.type='checkbox';check.checked=true;
+    row.append(check,thumb(p),node('strong',(i+1)+'. '+p.name),node('span',int.format(p.width)+' × '+int.format(p.height)+' mm'));
+    const paths=p.paths.map((_,j)=>field(row,'Linha '+(j+1),options([['CORTE_ABERTO','Corte aberto'],['VINCO','Vinco'],['REFERENCIA','Referência']],'CORTE_ABERTO')));
+    chosen.push({p,check,paths});body.append(row);
+  });
+}
+function sheetDetails(sheet) {
+  const cut=freeRectangle(sheet);
+  $('details').textContent=(sheet.stock?'Retalho':'Chapa')+' · '+int.format(sheet.size.width)+' × '+int.format(sheet.size.height)+' mm'+
+    ($('grain').value?' · '+($('grain').value==='v'?'↕ Vertical':'↔ Horizontal'):'')+
+    '\nÁrea livre bruta: '+squareMetres(sheetArea(sheet)-sheet.used)+'\nRetalho retangular conservador: '+int.format(cut.width)+' × '+int.format(cut.height)+' mm.\nClique ou arraste uma peça para ajustar.';
+}
+function checkPlan(current, types=pieces) {
+  const counts=new Map(types.map(p=>[p.id,0]));
+  for(const sheet of current.sheets){
+    const local=new Map();
+    for(const p of sheet.placements){
+      if(!counts.has(p.id)) throw Error('Peça desconhecida.');
+      counts.set(p.id,counts.get(p.id)+1);local.set(p.id,(local.get(p.id)||0)+1);
+    }
+    validateLayout([sheet],Array.from(local,([id,quantity])=>({id,quantity})),sheet.size);
+  }
+  if(types.some(p=>counts.get(p.id)!==p.quantity))throw Error('Quantidade divergente no plano.');
+  return counts;
+}
+function minimumGap(sheet) {
+  let min=Infinity;
+  const rings=sheet.placements.map(p=>p.outer.map(([x,y])=>[x+p.x,y+p.y]));
+  for(let i=0;i<rings.length;i++)for(let j=0;j<i;j++){
+    const a=sheet.placements[i],b=sheet.placements[j];
+    if(Math.max(0,a.x-b.x-b.width,b.x-a.x-a.width)**2+Math.max(0,a.y-b.y-b.height,b.y-a.y-a.height)**2>=min)continue;
+    for(const [first,second] of [[rings[i],rings[j]],[rings[j],rings[i]]])
+      for(const point of first)for(let k=0;k<second.length;k++)min=Math.min(min,pointDistance2(point,second[k],second[(k+1)%second.length]));
+  }
+  return Number.isFinite(min)?int.format(Math.sqrt(min))+' mm':'uma peça';
+}
+$('export').title='Conferir o plano em exibição';
+$('export').onclick=()=>{
+  const current=plan();if(!current)return;
+  const scope=options([['all','Todas as chapas'],['one','Somente a chapa em exibição']],'all');
+  const guides=options([['no','Cortes e vincos'],['yes','Incluir guias e referências']],'no');
+  const body=report('Conferência para exportação','Baixar DXF R12',()=>{
+    checkPlan(current);
+    const all=scope.value==='all';
+    download('plano-'+current.id+'-'+(all?'completo':'chapa-'+(sheetIndex+1))+'.dxf',exportDxf(all?current.sheets:[current.sheets[sheetIndex]],sheetSize,guides.value==='yes',roles),'application/dxf');
+  });
+  const counts=checkPlan(current);
+  body.append(node('strong',STRATEGIES[current.id].name),node('p','Lote completo · encaixadas / solicitadas'));
+  pieces.forEach(p=>body.append(node('div',p.name+' · '+counts.get(p.id)+' / '+p.quantity)));
+  current.sheets.forEach((s,i)=>body.append(node('p','Chapa '+(i+1)+' · '+s.placements.length+' peças · Menor distância: '+minimumGap(s))));
+  field(body,'Exportar',scope);field(body,'Camadas',guides);
+};
+function reconstruct(piece, pose) {
+  const {x,y,angle}=pose;
+  if(![x,y,angle].every(Number.isFinite)||piece.orientation==='fixed' && Math.abs(angle%180)>1e-7)throw Error('Confira a posição e o ângulo permitido.');
+  const rotated=rotatePiece(piece,angle);
+  return {...rotated,x,y,angle,locked:!!pose.locked};
+}
+function bindPart(group,drawing,part,sheet) {
+  group.dataset.part=part.id; group.tabIndex=0;
+  group.setAttribute('aria-label','Ajustar '+part.name);
+  group.onkeydown=e=>{if(e.key==='Enter')editPose(part,sheet,part.x,part.y)};
+  if($('grain').value && pieces.find(p=>p.id===part.id)?.orientation==='fixed'){
+    group.append(vector('text',{x:part.width/2,y:part.height*.8,'text-anchor':'middle','font-size':Math.min(55,part.height*.18),'pointer-events':'none'},$('grain').value==='v'?'↕':'↔'));
+  }
+  group.onpointerdown=e=>{
+    if(e.button!==0)return;
+    const point=ev=>new DOMPoint(ev.clientX,ev.clientY).matrixTransform(drawing.getScreenCTM().inverse());
+    const start=point(e);group.setPointerCapture(e.pointerId);
+    const reset=()=>{group.onpointermove=null;group.onpointerup=null;group.setAttribute('transform','translate('+part.x+' '+part.y+')')};
+    group.onpointercancel=reset;
+    group.onpointermove=ev=>{if(!part.locked){const end=point(ev);group.setAttribute('transform','translate('+(part.x+end.x-start.x)+' '+(part.y+end.y-start.y)+')')}};
+    group.onpointerup=ev=>{const end=point(ev);reset();editPose(part,sheet,part.x+(part.locked?0:end.x-start.x),part.y+(part.locked?0:end.y-start.y))};
+  };
+}
+function editPose(part,sheet,newX,newY){
+  const x=numberInput(+newX.toFixed(5)),y=numberInput(+newY.toFixed(5)),angle=numberInput(part.angle);
+  const lock=node('input');lock.type='checkbox';lock.checked=!!part.locked;
+  const enable=()=>{for(const el of [x,y,angle])el.disabled=lock.checked};lock.onchange=enable;enable();
+  const body=report('Ajustar '+part.name,'Aplicar posição',()=>{
+    const piece=pieces.find(p=>p.id===part.id);
+    const updated=reconstruct(piece,{x:x.valueAsNumber,y:y.valueAsNumber,angle:angle.valueAsNumber,locked:lock.checked});
+    const index=sheet.placements.indexOf(part);
+    sheet.placements[index]=updated;
+    try{checkPlan(plan())}catch(e){sheet.placements[index]=part;throw e}
+    refreshPatterns(plan());renderResults();
+  });
+  body.append(node('p','Coordenadas em mm a partir do canto superior esquerdo. A trava vale para este plano. Um novo cálculo gera outros planos.'));
+  field(body,'X',x);field(body,'Y',y);field(body,'Giro (°)',angle);field(body,'Travar posição',lock);
+}
+function stockRows(raw, base=sheetSize) {
+  if(!Array.isArray(raw)||raw.length>100)throw Error('Use até 100 formatos.');
+  return raw.map(r=>{const {width,height}=sheetDimensions({...base,width:r.width,height:r.height});
+    if(!Number.isInteger(r.quantity)||r.quantity<1||r.quantity>500)throw Error('Quantidade de retalhos inválida.');
+    return {width,height,quantity:r.quantity};});
+}
+$('stock').onclick=()=>{
+  const rows=[];
+  const body=report('Chapas e retalhos disponíveis','Aplicar estoque',()=>{
+    stock=stockRows(rows.filter(r=>r.row.isConnected).map(r=>({width:r.w.valueAsNumber,height:r.h.valueAsNumber,quantity:r.q.valueAsNumber})));
+    saveSettings();if(pieces.length)run();
+  });
+  body.append(node('p','Os retalhos são usados na ordem cadastrada. O saldo do lote usa a chapa principal.'));
+  const list=node('div');body.append(list);
+  function add(r){const row=node('div',null,'test-row');const w=field(row,'L mm',numberInput(r.width)),h=field(row,'A mm',numberInput(r.height)),q=field(row,'Qtd.',numberInput(r.quantity));
+    const del=node('button','Remover');del.onclick=()=>row.remove();row.append(del);list.append(row);rows.push({row,w,h,q});}
+  stock.forEach(add);const button=node('button','Adicionar formato');button.onclick=()=>add({width:600,height:900,quantity:1});body.append(button);
+};
+function saveSettings(){try{localStorage.setItem(storageKey+'.settings',JSON.stringify({stock,roles,grain:$('grain').value,objective:objective()}))}catch{}}
+function restoreSettings(){try{const s=JSON.parse(localStorage.getItem(storageKey+'.settings'));if(s){stock=stockRows(s.stock);roles=s.roles||{};$('grain').value=s.grain;$('objective').value=s.objective}}catch{}}
+$('objective').onchange=()=>{saveSettings();if(pieces.length)run()};
+$('grain').onchange=()=>{saveSettings();renderSheet()};
+$('save-project').onclick=()=>download('projeto-de-corte.json',JSON.stringify({format:'chapas-teste-1',sheetSize,stock,objective:objective(),grain:$('grain').value,roles,pieces:pieces.map(serialPiece),active,sheetIndex,
+  layouts:result?.plans.map(p=>({id:p.id,sheets:p.sheets.map(s=>({size:s.size,stock:s.stock,poses:s.placements.map(({id,x,y,angle,locked})=>({id,x,y,angle,locked}))}))})),best:result?.bestId}), 'application/json');
+$('load-project').onclick=()=>$('project-file').click();
+$('project-file').onchange=async e=>{
+  const file=e.target.files[0];e.target.value='';if(!file)return;
+  try{
+    const s=JSON.parse(await file.text());
+    if(s.format!=='chapas-teste-1')throw Error('Selecione um projeto salvo nesta versão.');
+    const next=s.pieces.map(p=>makePiece(p)),dims=sheetDimensions(s.sheetSize);
+    if(new Set(next.map(p=>p.id)).size!==next.length||next.reduce((n,p)=>n+p.quantity,0)>MAX_PIECES)throw Error('Lote inválido.');
+    const inventory=stockRows(s.stock.map(r=>({...r})),dims);
+    const plans=s.layouts?.map(p=>{
+      if(!Object.hasOwn(STRATEGIES,p.id))throw Error('Estratégia inválida.');
+      const sheets=p.sheets.map(raw=>({size:sheetDimensions(raw.size),stock:!!raw.stock,placements:raw.poses.map(pose=>reconstruct(next.find(piece=>piece.id===pose.id),pose))}));
+      const candidate={id:p.id,sheets};checkPlan(candidate,next);refreshPatterns(candidate);return candidate;
+    });
+    if(plans && (!plans.some(p=>p.id===s.active)||!plans.some(p=>p.id===s.best)))throw Error('Plano inválido.');
+    const restoredRoles={};
+    for(const p of next)restoredRoles[p.id]=p.paths.map((_,i)=>['VINCO','REFERENCIA'].includes(s.roles?.[p.id]?.[i])?s.roles[p.id][i]:'CORTE_ABERTO');
+    sheetSize=dims;stock=inventory;roles=restoredRoles;
+    $('objective').value=s.objective==='repeat'?'repeat':'lot';$('grain').value=['h','v'].includes(s.grain)?s.grain:'';
+    setPieces(next);saveSettings();
+    if(plans){result={plans,bestId:s.best};active=s.active;sheetIndex=Math.max(0,Math.min(Number(s.sheetIndex)||0,plan().sheets.length-1));renderResults()}
+  }catch(err){alert('Falha ao abrir projeto: '+err.message)}
+};
