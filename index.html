@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Otimizador privado de planos de corte para chapas de polionda.">
+  <meta name="description" content="Otimize o corte de chapas com dimensões configuráveis e exporte o plano em DXF.">
   <meta name="theme-color" content="#f6f7fb">
-  <title>Plano de Corte · Polionda</title>
+  <title>Otimizador de corte de chapas</title>
   <link rel="icon" type="image/svg+xml" href="mark.svg">
   <link rel="stylesheet" href="app.css">
   <script type="module" src="app.js"></script>
@@ -17,7 +17,7 @@
         <span class="brand-mark" data-icon="layers"></span>
         <span>Plano de Corte</span>
         <span class="brand-line"></span>
-        <span class="brand-material">Polionda</span>
+        <span class="brand-material">Chapas</span>
       </div>
     </div>
   </header>
@@ -25,8 +25,8 @@
   <main>
     <section class="intro" aria-labelledby="title">
       <div>
-        <h1 id="title">Otimizador de polionda</h1>
-        <p>Cadastre as peças, compare os encaixes e exporte o plano para corte.</p>
+        <h1 id="title">Otimizador de corte de chapas</h1>
+        <p>Configure as dimensões da chapa, otimize o encaixe das peças e exporte o plano de corte em DXF.</p>
       </div>
       <button class="button secondary example-button" id="example" type="button"><span data-icon="flask"></span> Carregar exemplo</button>
     </section>
@@ -37,7 +37,7 @@
           <div class="material-top">
             <span class="section-icon" data-icon="sheet"></span>
             <div>
-              <h2 id="material-title">Chapa de polionda</h2>
+              <h2 id="material-title">Configuração da chapa</h2>
               <p><strong id="material-size">1.300 × 2.000</strong> mm</p>
             </div>
             <button type="button" id="edit-sheet" class="icon-button edit-sheet" title="Editar parâmetros da chapa" aria-label="Editar parâmetros da chapa"><span data-icon="edit"></span></button>
